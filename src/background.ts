@@ -12,15 +12,24 @@ async function messageHandler(
   sender: chrome.runtime.MessageSender,
   callback?: (response?: any) => void,
 ) {
-  switch (action) {
-    case 'storage':
-      await storage.set({ [data.key]: data.value })
-      updatePage(data.key, data.value)
-      callback?.(data)
-      break
-    case 'fetch':
-      fetchData(sender.url).then(callback)
-      break
+  try {
+    switch (action) {
+      case 'storage':
+        await storage.set({ [data.key]: data.value })
+        updatePage(data.key, data.value)
+        callback?.(data)
+        break
+      case 'fetch':
+        fetchData(sender.url)
+          .then(res => callback?.(res))
+          .catch(() => callback?.(null))
+        break
+      default:
+        callback?.()
+        break
+    }
+  } catch (err) {
+    callback?.()
   }
 }
 
@@ -55,11 +64,27 @@ const actionMap = {
 
 function updatePage(key: keyof typeof actionMap, value?: any) {
   const action = actionMap[key]
-  action &&
-    chrome.tabs.query({ currentWindow: true, active: true }, tabs => {
-      tabs.length &&
-        chrome.tabs.sendMessage(tabs[0].id, { action, data: { key, value } })
-    })
+  if (!action) return
+  chrome.tabs.query({ currentWindow: true, active: true }, tabs => {
+    if (tabs && tabs.length && tabs[0].id !== undefined) {
+      try {
+        const p = chrome.tabs.sendMessage(
+          tabs[0].id,
+          { action, data: { key, value } },
+          () => {
+            if (chrome.runtime.lastError) {
+              // Active tab doesn't have md-reader content script (e.g. chrome://extensions)
+            }
+          },
+        )
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {})
+        }
+      } catch (err) {
+        // Ignore
+      }
+    }
+  })
 }
 
 chrome.runtime.setUninstallURL(

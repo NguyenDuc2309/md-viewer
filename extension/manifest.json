@@ -1,0 +1,97 @@
+{
+  "name": "__MSG_ext_name__",
+  "version": "2.12.12",
+  "version_name": "2.12.12",
+  "author": "Bener",
+  "manifest_version": 3,
+  "description": "__MSG_ext_desc__",
+  "default_locale": "en",
+  "icons": {
+    "16": "images/logo-stroke.png",
+    "32": "images/logo-stroke.png",
+    "48": "images/logo-stroke.png",
+    "128": "images/logo-stroke.png",
+    "512": "images/logo-stroke.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["css/*", "fonts/*", "images/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "action": {
+    "default_title": "md-reader",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["*://*/*"],
+  "content_scripts": [
+    {
+      "js": ["js/content.js"],
+      "css": ["css/content.css"],
+      "matches": [
+        "*://*/*.md",
+        "*://*/*.mdx",
+        "*://*/*.mkd",
+        "*://*/*.markdown",
+        "*://*/*.MD",
+        "*://*/*.MDX",
+        "*://*/*.MKD",
+        "*://*/*.MARKDOWN",
+        "file://*/*.md",
+        "file://*/*.mdx",
+        "file://*/*.mkd",
+        "file://*/*.markdown",
+        "file://*/*.MD",
+        "file://*/*.MDX",
+        "file://*/*.MKD",
+        "file://*/*.MARKDOWN",
+        "*://*/*.md?*",
+        "*://*/*.mdx?*",
+        "*://*/*.mkd?*",
+        "*://*/*.markdown?*",
+        "*://*/*.MD?*",
+        "*://*/*.MDX?*",
+        "*://*/*.MKD?*",
+        "*://*/*.MARKDOWN?*",
+        "file://*/*.md?*",
+        "file://*/*.mdx?*",
+        "file://*/*.mkd?*",
+        "file://*/*.markdown?*",
+        "file://*/*.MD?*",
+        "file://*/*.MDX?*",
+        "file://*/*.MKD?*",
+        "file://*/*.MARKDOWN?*"
+      ]
+    }
+  ],
+  "commands": {
+    "toggleSide": {
+      "description": "__MSG_command_toggle_side__",
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      }
+    },
+    "toggleCentered": {
+      "description": "__MSG_command_toggle_centered__",
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      }
+    },
+    "toggleRefresh": {
+      "description": "__MSG_command_toggle_refresh__",
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      }
+    },
+    "toggleTheme": {
+      "description": "__MSG_command_toggle_theme__",
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      }
+    }
+  }
+}

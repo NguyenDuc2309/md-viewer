@@ -32,6 +32,15 @@
     "TaskLists": "TaskList",
     "TOC": "TOC",
     "Alert": "Alert",
+    "tab_outline": "Outline",
+    "tab_folder": "Folder",
+    "btn_open_folder": "Open Folder",
+    "btn_change_folder": "Change",
+    "btn_close_folder": "Close",
+    "placeholder_search": "Filter files...",
+    "no_folder_selected": "No folder selected",
+    "no_files_found": "No markdown files found",
+    "folder_desc": "Select a local directory to browse and switch markdown files.",
     "warning_message": "Open the details page of extension \"md-reader\" and active \"allow access to file URLs\"."
   },
   "zh-CN": {
@@ -57,6 +66,15 @@
     "TaskLists": "复选框",
     "TOC": "目录",
     "Alert": "警告框",
+    "tab_outline": "大纲",
+    "tab_folder": "目录",
+    "btn_open_folder": "打开文件夹",
+    "btn_change_folder": "更换",
+    "btn_close_folder": "关闭",
+    "placeholder_search": "搜索文件...",
+    "no_folder_selected": "未选择文件夹",
+    "no_files_found": "未找到 Markdown 文件",
+    "folder_desc": "选择本地目录浏览并切换 Markdown 文件。",
     "warning_message": "请在 “md-reader” 扩展程序的 “详情” 中开启 “允许访问文件网址” 权限。"
   },
   "zh-TW": {
@@ -82,6 +100,15 @@
     "TaskLists": "任務列表",
     "TOC": "目錄",
     "Alert": "警告框",
+    "tab_outline": "大綱",
+    "tab_folder": "目錄",
+    "btn_open_folder": "開啟資料夾",
+    "btn_change_folder": "更換",
+    "btn_close_folder": "關閉",
+    "placeholder_search": "搜尋檔案...",
+    "no_folder_selected": "未選擇資料夾",
+    "no_files_found": "未找到 Markdown 檔案",
+    "folder_desc": "選擇本機目錄瀏覽並切換 Markdown 檔案。",
     "warning_message": "請在 “md-reader” 扩展程序的 “詳情” 中開啟 “允許訪問文件網址” 權限。"
   },
   "ko": {
@@ -107,6 +134,15 @@
     "TaskLists": "작업 목록",
     "TOC": "카테고리",
     "Alert": "알림 블록",
+    "tab_outline": "개요",
+    "tab_folder": "폴더",
+    "btn_open_folder": "폴더 열기",
+    "btn_change_folder": "변경",
+    "btn_close_folder": "닫기",
+    "placeholder_search": "파일 검색...",
+    "no_folder_selected": "폴더가 선택되지 않음",
+    "no_files_found": "Markdown 파일을 찾을 수 없습니다",
+    "folder_desc": "로컬 폴더를 열어 Markdown 파일을 탐색하세요.",
     "warning_message": "확장 프로그램 \"md-reader\" 의 세부 정보 페이지를 열고 \"파일 URL에 대한 액세스 허용\"을 활성화 하세요."
   },
   "uk": {
@@ -132,6 +168,15 @@
     "TaskLists": "Списки завдань",
     "TOC": "Зміст",
     "Alert": "Блок сповіщень",
+    "tab_outline": "Зміст",
+    "tab_folder": "Папка",
+    "btn_open_folder": "Відкрити папку",
+    "btn_change_folder": "Змінити",
+    "btn_close_folder": "Закрити",
+    "placeholder_search": "Пошук файлів...",
+    "no_folder_selected": "Папку не вибрано",
+    "no_files_found": "Файлів Markdown не знайдено",
+    "folder_desc": "Виберіть папку для перегляду файлів Markdown.",
     "warning_message": "Відкрийте сторінку керування розширенням «md-reader» та активуйте «Надавати доступ до URL-адрес файлу»."
   }
 }

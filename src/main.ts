@@ -17,6 +17,8 @@ import {
   getMediaQueryTheme,
   toTheme,
 } from '@/shared'
+import i18n from '@/config/i18n'
+import { FolderManager } from '@/core/folder'
 import codeIcon from '@/images/icon_code.svg'
 import sideIcon from '@/images/icon_side.svg'
 import goTopIcon from '@/images/icon_go_top.svg'
@@ -53,9 +55,18 @@ function main(data: Data) {
       onToggleSide()
     },
   }
+  let localize = i18n(configData.language)
+  let folderManager: FolderManager | null = null
+  let updateTabLabels: () => void = () => {}
+
   chrome.runtime.onMessage.addListener(({ action, data: { key, value } }) => {
     const oldValue = configData[key]
     configData[key] = value
+    if (key === 'language') {
+      localize = i18n(value)
+      folderManager?.setLanguage(value)
+      updateTabLabels()
+    }
     actions[action]?.(value, oldValue)
   })
 
@@ -122,16 +133,76 @@ function main(data: Data) {
   )
 
   /* render side */
-  const mdSide = new Ele<HTMLElement>('ul', { className: className.MD_SIDE })
+  const mdSide = new Ele<HTMLElement>('aside', { className: className.MD_SIDE })
+  const sideTabs = new Ele<HTMLElement>('div', {
+    className: className.SIDE_TABS,
+  })
+
+  const tabOutline = new Ele<HTMLElement>('button', {
+    className: `${className.SIDE_TAB_ITEM} ${className.SIDE_TAB_ITEM_ACTIVE}`,
+    type: 'button',
+  })
+  const tabFolder = new Ele<HTMLElement>('button', {
+    className: className.SIDE_TAB_ITEM,
+    type: 'button',
+  })
+
+  const sideOutlinePanel = new Ele<HTMLElement>('ul', {
+    className: `${className.SIDE_PANEL} ${className.SIDE_PANEL_OUTLINE}`,
+  })
+  const sideFolderPanel = new Ele<HTMLElement>('div', {
+    className: `${className.SIDE_PANEL} ${className.SIDE_PANEL_FOLDER}`,
+  })
+  sideFolderPanel.hide()
+
+  updateTabLabels = () => {
+    tabOutline.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${localize(
+      'tab_outline',
+    )}</span>`
+    tabFolder.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg><span>${localize(
+      'tab_folder',
+    )}</span>`
+  }
+  updateTabLabels()
+
+  tabOutline.on('click', () => {
+    tabOutline.classList.add(className.SIDE_TAB_ITEM_ACTIVE)
+    tabFolder.classList.remove(className.SIDE_TAB_ITEM_ACTIVE)
+    sideOutlinePanel.show()
+    sideFolderPanel.hide()
+  })
+
+  tabFolder.on('click', () => {
+    tabFolder.classList.add(className.SIDE_TAB_ITEM_ACTIVE)
+    tabOutline.classList.remove(className.SIDE_TAB_ITEM_ACTIVE)
+    sideOutlinePanel.hide()
+    sideFolderPanel.show()
+  })
+
+  sideTabs.append([tabOutline, tabFolder])
+  mdSide.append([sideTabs, sideOutlinePanel, sideFolderPanel])
+
+  folderManager = new FolderManager(
+    sideFolderPanel.ele,
+    (content: string, fileName: string) => {
+      mdRaw = content
+      contentRender(content)
+      document.title = fileName
+      renderSide()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    },
+    configData.language,
+  )
+
   let idCache: { [content: string]: number } = Object.create(null)
   let headElements: HTMLElement[] = []
   let sideLiElements: HTMLElement[] = []
   let df: Ele<DocumentFragment> = null
   let targetIndex: number = null
-  mdSide.on('mouseenter', () => {
+  sideOutlinePanel.on('mouseenter', () => {
     isSideHover = true
   })
-  mdSide.on('mouseleave', () => {
+  sideOutlinePanel.on('mouseleave', () => {
     isSideHover = false
   })
 
@@ -266,8 +337,8 @@ function main(data: Data) {
     headElements = getHeads(mdContent)
     df = new Ele<DocumentFragment>('#document-fragment')
     sideLiElements = headElements.reduce(handleHeadItem, [])
-    mdSide.innerHTML = null
-    mdSide.append(df)
+    sideOutlinePanel.innerHTML = null
+    sideOutlinePanel.append(df)
     setTimeout(onScroll, 0)
   }
 
