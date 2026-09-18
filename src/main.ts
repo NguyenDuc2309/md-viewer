@@ -346,25 +346,32 @@ function main(data: Data) {
         pollingTimer = setTimeout(watch, 500)
         return
       }
-      chrome.runtime.sendMessage({ action: 'fetch' }, res => {
-        if (res !== undefined) {
-          if (mdRaw === undefined || mdRaw === null) {
-            if (res) {
-              window.location.reload()
-              return
+      const activeUrl =
+        folderManager instanceof PathFolderManager
+          ? folderManager.getActiveUrl()
+          : null
+      chrome.runtime.sendMessage(
+        { action: 'fetch', data: { url: activeUrl } },
+        res => {
+          if (res !== undefined) {
+            if (mdRaw === undefined || mdRaw === null) {
+              if (res) {
+                window.location.reload()
+                return
+              }
+            } else if (mdRaw !== res) {
+              mdRaw = res
+              contentRender(res)
+              renderSide()
+              /* update raw content */
+              setTimeout(() => {
+                rawContainer.textContent = res
+              }, 0)
             }
-          } else if (mdRaw !== res) {
-            mdRaw = res
-            contentRender(res)
-            renderSide()
-            /* update raw content */
-            setTimeout(() => {
-              rawContainer.textContent = res
-            }, 0)
           }
-        }
-        pollingTimer = setTimeout(watch, 500)
-      })
+          pollingTimer = setTimeout(watch, 500)
+        },
+      )
     })()
   }
 

@@ -31,6 +31,9 @@ const MAX_SCAN_LISTINGS = 120
 const STORAGE_ROOT = 'folderRoot'
 const STORAGE_EXPANDED = 'folderExpanded'
 const STORAGE_RECENT = 'recentFolders'
+/** page url -> file last shown in place of it (so F5 comes back to it) */
+const STORAGE_VIEWED = 'folderViewed'
+const MAX_VIEWED = 20
 
 interface DirEntry {
   name: string
@@ -48,6 +51,18 @@ function storageGet<T = any>(keys: string[]): Promise<T> {
 }
 function storageSet(data: object): Promise<void> {
   return new Promise(resolve => chrome.storage.local.set(data, resolve))
+}
+
+function fetchFile(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ action: 'fetch', data: { url } }, res => {
+      if (chrome.runtime.lastError || typeof res !== 'string') {
+        reject(new Error(chrome.runtime.lastError?.message || 'no response'))
+      } else {
+        resolve(res)
+      }
+    })
+  })
 }
 
 function listDir(url: string): Promise<DirEntry[]> {
@@ -118,6 +133,7 @@ export class PathFolderManager {
   private fileInput: HTMLInputElement
   private callbacks: PathFolderCallbacks
   private currentFile: string = window.location.href.split(/[?#]/)[0]
+  private readonly pageUrl: string = this.currentFile
 
   constructor(
     container: HTMLElement,
@@ -143,6 +159,8 @@ export class PathFolderManager {
     })
     document.body.appendChild(this.fileInput)
 
+    window.addEventListener('popstate', this.onPopState)
+
     this.render()
     this.restore()
   }
@@ -164,6 +182,7 @@ export class PathFolderManager {
       STORAGE_ROOT,
       STORAGE_EXPANDED,
       STORAGE_RECENT,
+      STORAGE_VIEWED,
     ])
     this.recents = Array.isArray(data[STORAGE_RECENT])
       ? data[STORAGE_RECENT]
@@ -173,6 +192,13 @@ export class PathFolderManager {
       const saved = (data[STORAGE_EXPANDED] || {})[root]
       this.expanded = new Set(Array.isArray(saved) ? saved : [])
       await this.openRoot(root, false)
+      // Come back to the file that was shown here before a reload
+      const viewed = (data[STORAGE_VIEWED] || {})[this.pageUrl]
+      if (viewed && !sameUrl(viewed, this.pageUrl) && this.rootNode) {
+        await this.showFile(viewed, nameOf(viewed), false)
+        await this.expandToCurrentFile()
+        this.render()
+      }
     } else {
       this.render()
     }
@@ -184,6 +210,18 @@ export class PathFolderManager {
     const map = data[STORAGE_EXPANDED] || {}
     map[this.rootUrl] = Array.from(this.expanded)
     await storageSet({ [STORAGE_EXPANDED]: map })
+  }
+
+  private async persistViewed(url: string) {
+    const data = await storageGet([STORAGE_VIEWED])
+    const map: Record<string, string> = data[STORAGE_VIEWED] || {}
+    delete map[this.pageUrl]
+    if (!sameUrl(url, this.pageUrl)) {
+      const keys = Object.keys(map)
+      if (keys.length >= MAX_VIEWED) delete map[keys[0]]
+      map[this.pageUrl] = url
+    }
+    await storageSet({ [STORAGE_VIEWED]: map })
   }
 
   private async saveRecent(url: string) {
@@ -380,7 +418,11 @@ export class PathFolderManager {
   }
 
   public closeFolder() {
-    const hadMemoryFile = this.memoryMode && !!this.activeMemoryPath
+    const showingOtherFile =
+      (this.memoryMode && !!this.activeMemoryPath) ||
+      !sameUrl(this.currentFile, this.pageUrl)
+    this.currentFile = this.pageUrl
+    this.persistViewed(this.pageUrl)
     this.rootUrl = null
     this.rootNode = null
     this.memoryMode = false
@@ -391,7 +433,7 @@ export class PathFolderManager {
     this.fileInput.value = ''
     storageSet({ [STORAGE_ROOT]: null })
     this.render()
-    if (hadMemoryFile) this.callbacks.onFolderClosed?.()
+    if (showingOtherFile) this.callbacks.onFolderClosed?.()
   }
 
   private async loadChildren(node: FileTreeNode) {
@@ -505,7 +547,46 @@ export class PathFolderManager {
       return
     }
     if (!node.url || sameUrl(node.url, this.currentFile)) return
-    window.location.href = node.url
+    await this.showFile(node.url, node.name, true)
+  }
+
+  /**
+   * Swap the rendered document without reloading the page, so the sidebar
+   * (and this tree) stay put. The address bar follows via pushState when the
+   * browser allows it.
+   */
+  private async showFile(url: string, name: string, push: boolean) {
+    try {
+      const content = await fetchFile(url)
+      this.currentFile = url
+      if (push) {
+        try {
+          history.pushState({ mdReaderFile: url }, '', url)
+        } catch {
+          /* cross-file pushState not allowed on this origin - keep the url */
+        }
+      }
+      this.callbacks.onFileSelected(content, name, displayPath(url))
+      this.persistViewed(url)
+      this.render()
+    } catch (err) {
+      console.error('Error reading markdown file:', err)
+      this.notice = this.localize('folder_not_found')
+      this.render()
+    }
+  }
+
+  /** URL of the document currently shown (for auto refresh) */
+  public getActiveUrl(): string | null {
+    return this.memoryMode ? null : this.currentFile
+  }
+
+  /** Back/forward between files opened from the tree */
+  private onPopState = (e: PopStateEvent) => {
+    const url =
+      (e.state && e.state.mdReaderFile) || window.location.href.split(/[?#]/)[0]
+    if (!url.startsWith('file://') || sameUrl(url, this.currentFile)) return
+    this.showFile(url, nameOf(url), false)
   }
 
   /* ---------- rendering ---------- */

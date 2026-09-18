@@ -20,7 +20,7 @@ async function messageHandler(
         callback?.(data)
         break
       case 'fetch':
-        fetchData(sender.url)
+        fetchData((data && data.url) || sender.url)
           .then(res => callback?.(res))
           .catch(() => callback?.(null))
         break
