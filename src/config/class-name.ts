@@ -33,4 +33,7 @@ export default {
   FOLDER_ITEM_DIR: p`folder-item--dir`,
   FOLDER_ITEM_ACTIVE: p`folder-item--active`,
   FOLDER_EMPTY: p`folder-empty`,
+  FOLDER_RECENT: p`folder-recent`,
+  FOLDER_RECENT_LIST: p`folder-recent-list`,
+  FOLDER_RECENT_ITEM: p`folder-recent-item`,
 }

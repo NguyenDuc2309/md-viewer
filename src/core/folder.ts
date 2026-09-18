@@ -7,35 +7,136 @@ export interface FileTreeNode {
   isDirectory: boolean
   children?: FileTreeNode[]
   fileObj?: File
+  fileHandle?: FsFileHandle
   expanded?: boolean
 }
 
+/* Minimal File System Access API typings (not fully covered by lib.dom in TS 4.x) */
+type FsPermission = 'granted' | 'denied' | 'prompt'
+interface FsHandle {
+  kind: 'file' | 'directory'
+  name: string
+  isSameEntry(other: FsHandle): Promise<boolean>
+  queryPermission(opts?: { mode: 'read' | 'readwrite' }): Promise<FsPermission>
+  requestPermission(opts?: {
+    mode: 'read' | 'readwrite'
+  }): Promise<FsPermission>
+}
+interface FsFileHandle extends FsHandle {
+  kind: 'file'
+  getFile(): Promise<File>
+}
+interface FsDirHandle extends FsHandle {
+  kind: 'directory'
+  entries(): AsyncIterableIterator<[string, FsFileHandle | FsDirHandle]>
+}
+
+export interface RecentFolder {
+  id: string
+  name: string
+  handle: FsDirHandle
+  lastOpened: number
+}
+
 const MD_EXTENSIONS = ['.md', '.markdown', '.mkd', '.mdx']
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'target'])
+const MAX_RECENT = 10
+const MAX_DEPTH = 16
+const DB_NAME = 'md-reader'
+const DB_STORE = 'recent-folders'
 
 function isMarkdownFile(name: string): boolean {
   const lower = name.toLowerCase()
   return MD_EXTENSIONS.some(ext => lower.endsWith(ext))
 }
 
+function shouldSkipDir(name: string): boolean {
+  return name.startsWith('.') || SKIP_DIRS.has(name)
+}
+
+function hasFsAccess(): boolean {
+  return typeof (window as any).showDirectoryPicker === 'function'
+}
+
+/* ---------- IndexedDB persistence for recent folder handles ---------- */
+
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE, { keyPath: 'id' })
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function withStore<T>(
+  mode: IDBTransactionMode,
+  fn: (store: IDBObjectStore) => IDBRequest<T> | void,
+): Promise<T> {
+  return openDb().then(
+    db =>
+      new Promise<T>((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, mode)
+        const req = fn(tx.objectStore(DB_STORE))
+        tx.oncomplete = () => resolve(req ? req.result : undefined)
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error)
+      }),
+  )
+}
+
+async function loadRecents(): Promise<RecentFolder[]> {
+  try {
+    const list = await withStore<RecentFolder[]>('readonly', s => s.getAll())
+    return (list || []).sort((a, b) => b.lastOpened - a.lastOpened)
+  } catch {
+    return []
+  }
+}
+
+function deleteRecent(id: string): Promise<void> {
+  return withStore<undefined>('readwrite', s => {
+    s.delete(id)
+  }).catch(() => {})
+}
+
+/* ---------- FolderManager ---------- */
+
+interface FolderCallbacks {
+  onFileSelected: (content: string, name: string, path: string) => void
+  onFolderClosed?: () => void
+}
+
 export class FolderManager {
   private rootNode: FileTreeNode | null = null
-  private activePath: string | null = null
+  private activeNode: FileTreeNode | null = null
+  private activeLastModified: number = 0
   private searchQuery: string = ''
-  private onFileSelected: (content: string, name: string, path: string) => void
+  private recents: RecentFolder[] = []
+  private showRecents: boolean = false
+  private loading: boolean = false
+  private notice: string = ''
+  private callbacks: FolderCallbacks
   private localize: (key: string) => string = i18n()
   private container: HTMLElement
   private fileInput: HTMLInputElement
+  private fsAccess: boolean = hasFsAccess()
 
   constructor(
     container: HTMLElement,
-    onFileSelected: (content: string, name: string, path: string) => void,
+    callbacks: FolderCallbacks,
     language?: string,
   ) {
     this.container = container
-    this.onFileSelected = onFileSelected
+    this.callbacks = callbacks
     this.localize = i18n(language)
 
-    // Synchronous native input for reliable user gesture preservation on all pages (including file://)
+    // Fallback picker for browsers without the File System Access API
     this.fileInput = document.createElement('input')
     this.fileInput.type = 'file'
     // @ts-ignore
@@ -44,17 +145,17 @@ export class FolderManager {
     this.fileInput.directory = true
     this.fileInput.multiple = true
     this.fileInput.style.display = 'none'
-
-    this.fileInput.addEventListener('change', async () => {
+    this.fileInput.addEventListener('change', () => {
       if (this.fileInput.files && this.fileInput.files.length > 0) {
         this.rootNode = this.buildTreeFromFileList(this.fileInput.files)
         this.searchQuery = ''
         this.render()
       }
     })
-
     document.body.appendChild(this.fileInput)
+
     this.render()
+    this.restoreLastFolder()
   }
 
   public setLanguage(language?: string) {
@@ -62,9 +163,193 @@ export class FolderManager {
     this.render()
   }
 
-  public pickFolder() {
-    this.fileInput.value = ''
-    this.fileInput.click()
+  public hasActiveFile(): boolean {
+    return !!this.activeNode
+  }
+
+  /**
+   * Re-read the active file if it changed on disk (used by auto refresh).
+   * Resolves `null` when nothing changed or nothing is selected.
+   */
+  public async readActiveFileIfChanged(): Promise<string | null> {
+    const node = this.activeNode
+    if (!node || !node.fileHandle) return null
+    try {
+      const file = await node.fileHandle.getFile()
+      if (file.lastModified === this.activeLastModified) return null
+      this.activeLastModified = file.lastModified
+      return await file.text()
+    } catch {
+      return null
+    }
+  }
+
+  /* ---------- opening folders ---------- */
+
+  public async pickFolder() {
+    if (!this.fsAccess) {
+      this.fileInput.value = ''
+      this.fileInput.click()
+      return
+    }
+    let handle: FsDirHandle
+    try {
+      handle = await (window as any).showDirectoryPicker({ mode: 'read' })
+    } catch (err) {
+      if (err && err.name === 'AbortError') return
+      // API blocked on this page (e.g. insecure context) - fall back
+      console.warn('showDirectoryPicker failed, falling back to input', err)
+      this.fsAccess = false
+      this.fileInput.value = ''
+      this.fileInput.click()
+      return
+    }
+    await this.openHandle(handle)
+  }
+
+  public async openRecent(recent: RecentFolder) {
+    const handle = recent.handle
+    try {
+      let perm = await handle.queryPermission({ mode: 'read' })
+      if (perm !== 'granted') {
+        perm = await handle.requestPermission({ mode: 'read' })
+      }
+      if (perm !== 'granted') {
+        this.setNotice(this.localize('folder_permission_denied'))
+        return
+      }
+    } catch (err) {
+      console.warn('Recent folder permission error', err)
+      this.setNotice(this.localize('folder_permission_denied'))
+      return
+    }
+    await this.openHandle(handle, recent.id)
+  }
+
+  private async openHandle(handle: FsDirHandle, existingId?: string) {
+    this.loading = true
+    this.notice = ''
+    this.showRecents = false
+    this.render()
+    try {
+      const root = await this.buildTreeFromHandle(handle)
+      this.rootNode = root
+      this.activeNode = null
+      this.searchQuery = ''
+      await this.saveRecent(handle, existingId)
+    } catch (err) {
+      console.error('Failed to read folder', err)
+      // Folder was moved/deleted: drop it from recents
+      if (existingId && err && err.name === 'NotFoundError') {
+        await deleteRecent(existingId)
+        this.recents = this.recents.filter(r => r.id !== existingId)
+      }
+      this.notice = this.localize('folder_not_found')
+    }
+    this.loading = false
+    this.render()
+  }
+
+  private async restoreLastFolder() {
+    this.recents = await loadRecents()
+    this.render()
+    if (!this.fsAccess) return
+    const last = this.recents[0]
+    if (!last) return
+    try {
+      // Only restore silently when Chrome already granted access (no prompt)
+      const perm = await last.handle.queryPermission({ mode: 'read' })
+      if (perm === 'granted') {
+        await this.openHandle(last.handle, last.id)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async saveRecent(handle: FsDirHandle, existingId?: string) {
+    if (!this.fsAccess) return
+    let id = existingId
+    if (!id) {
+      for (const r of this.recents) {
+        try {
+          if (await r.handle.isSameEntry(handle)) {
+            id = r.id
+            break
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const entry: RecentFolder = {
+      id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: handle.name,
+      handle,
+      lastOpened: Date.now(),
+    }
+    this.recents = [entry, ...this.recents.filter(r => r.id !== entry.id)]
+    const overflow = this.recents.splice(MAX_RECENT)
+    try {
+      await withStore<undefined>('readwrite', s => {
+        s.put(entry)
+        overflow.forEach(r => s.delete(r.id))
+      })
+    } catch (err) {
+      console.warn('Unable to persist recent folder', err)
+    }
+  }
+
+  public async removeRecent(id: string) {
+    this.recents = this.recents.filter(r => r.id !== id)
+    await deleteRecent(id)
+    this.render()
+  }
+
+  private setNotice(text: string) {
+    this.notice = text
+    this.render()
+  }
+
+  /* ---------- tree building ---------- */
+
+  private async buildTreeFromHandle(
+    handle: FsDirHandle,
+    path: string = handle.name,
+    depth: number = 0,
+  ): Promise<FileTreeNode> {
+    const node: FileTreeNode = {
+      name: handle.name,
+      path,
+      isDirectory: true,
+      children: [],
+      expanded: depth === 0,
+    }
+    if (depth > MAX_DEPTH) return node
+
+    for await (const [name, child] of handle.entries()) {
+      if (child.kind === 'directory') {
+        if (shouldSkipDir(name)) continue
+        const sub = await this.buildTreeFromHandle(
+          child as FsDirHandle,
+          `${path}/${name}`,
+          depth + 1,
+        )
+        // Prune folders without markdown files
+        if (sub.children && sub.children.length > 0) {
+          node.children.push(sub)
+        }
+      } else if (isMarkdownFile(name)) {
+        node.children.push({
+          name,
+          path: `${path}/${name}`,
+          isDirectory: false,
+          fileHandle: child as FsFileHandle,
+        })
+      }
+    }
+    this.sortNode(node)
+    return node
   }
 
   private buildTreeFromFileList(files: FileList): FileTreeNode {
@@ -88,10 +373,7 @@ export class FolderManager {
       const relativePath = file.webkitRelativePath || file.name
       const parts = relativePath.split('/')
 
-      // Skip hidden folders and node_modules
-      if (parts.some(p => p.startsWith('.') || p === 'node_modules')) {
-        continue
-      }
+      if (parts.slice(0, -1).some(shouldSkipDir)) continue
 
       if (parts.length === 1) {
         root.children.push({
@@ -111,8 +393,8 @@ export class FolderManager {
         currentPath += `/${part}`
         const isFile = j === parts.length - 1
 
+        currentNode.children = currentNode.children || []
         if (isFile) {
-          currentNode.children = currentNode.children || []
           currentNode.children.push({
             name: part,
             path: currentPath,
@@ -120,7 +402,6 @@ export class FolderManager {
             fileObj: file,
           })
         } else {
-          currentNode.children = currentNode.children || []
           let nextNode = currentNode.children.find(
             c => c.isDirectory && c.name === part,
           )
@@ -139,21 +420,22 @@ export class FolderManager {
       }
     }
 
-    const sortNode = (node: FileTreeNode) => {
-      if (node.children) {
-        node.children.sort((a, b) => {
-          if (a.isDirectory === b.isDirectory) {
-            return a.name.localeCompare(b.name, undefined, { numeric: true })
-          }
-          return a.isDirectory ? -1 : 1
-        })
-        node.children.forEach(sortNode)
-      }
-    }
-    sortNode(root)
-
+    this.sortNode(root)
     return root
   }
+
+  private sortNode(node: FileTreeNode) {
+    if (!node.children) return
+    node.children.sort((a, b) => {
+      if (a.isDirectory === b.isDirectory) {
+        return a.name.localeCompare(b.name, undefined, { numeric: true })
+      }
+      return a.isDirectory ? -1 : 1
+    })
+    node.children.forEach(c => this.sortNode(c))
+  }
+
+  /* ---------- selection ---------- */
 
   public async selectFile(node: FileTreeNode) {
     if (node.isDirectory) {
@@ -164,24 +446,33 @@ export class FolderManager {
 
     try {
       let content = ''
-      if (node.fileObj) {
+      if (node.fileHandle) {
+        const file = await node.fileHandle.getFile()
+        this.activeLastModified = file.lastModified
+        content = await file.text()
+      } else if (node.fileObj) {
+        this.activeLastModified = node.fileObj.lastModified
         content = await node.fileObj.text()
       }
 
-      this.activePath = node.path
-      this.onFileSelected(content, node.name, node.path)
+      this.activeNode = node
+      this.callbacks.onFileSelected(content, node.name, node.path)
       this.render()
     } catch (err) {
       console.error('Error reading markdown file:', err)
+      this.setNotice(this.localize('folder_not_found'))
     }
   }
 
   public closeFolder() {
+    const hadActive = !!this.activeNode
     this.rootNode = null
-    this.activePath = null
+    this.activeNode = null
     this.searchQuery = ''
+    this.notice = ''
     this.fileInput.value = ''
     this.render()
+    if (hadActive) this.callbacks.onFolderClosed?.()
   }
 
   private filterNode(node: FileTreeNode, query: string): FileTreeNode | null {
@@ -216,10 +507,91 @@ export class FolderManager {
     return null
   }
 
+  /* ---------- rendering ---------- */
+
+  private folderSvg(size: number, strokeWidth = 2) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+  }
+
+  private clockSvg(size: number) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`
+  }
+
+  private closeSvg(size: number) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+  }
+
+  private renderRecentList(): HTMLElement {
+    const list = document.createElement('ul')
+    list.className = className.FOLDER_RECENT_LIST
+
+    if (this.recents.length === 0) {
+      const empty = document.createElement('li')
+      empty.className = 'md-reader__folder-recent-empty'
+      empty.textContent = this.localize('no_recent_folders')
+      list.appendChild(empty)
+      return list
+    }
+
+    for (const recent of this.recents) {
+      const li = document.createElement('li')
+      li.className = className.FOLDER_RECENT_ITEM
+      if (this.rootNode && this.rootNode.name === recent.name) {
+        li.classList.add('current')
+      }
+
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'md-reader__folder-recent-open'
+      btn.title = recent.name
+      btn.innerHTML = `${this.folderSvg(
+        13,
+      )}<span class="md-reader__folder-label">${recent.name}</span>`
+      btn.onclick = e => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.openRecent(recent)
+      }
+
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'md-reader__folder-recent-remove'
+      remove.title = this.localize('btn_remove_recent')
+      remove.innerHTML = this.closeSvg(11)
+      remove.onclick = e => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.removeRecent(recent.id)
+      }
+
+      li.appendChild(btn)
+      li.appendChild(remove)
+      list.appendChild(li)
+    }
+    return list
+  }
+
+  private renderNotice(): HTMLElement | null {
+    if (!this.notice) return null
+    const el = document.createElement('div')
+    el.className = 'md-reader__folder-notice'
+    el.textContent = this.notice
+    return el
+  }
+
   public render() {
     this.container.innerHTML = ''
     const wrap = document.createElement('div')
     wrap.className = className.FOLDER_WRAP
+
+    if (this.loading) {
+      const loading = document.createElement('div')
+      loading.className = 'md-reader__folder-no-match'
+      loading.textContent = this.localize('folder_loading')
+      wrap.appendChild(loading)
+      this.container.appendChild(wrap)
+      return
+    }
 
     if (
       !this.rootNode ||
@@ -232,13 +604,13 @@ export class FolderManager {
 
       const icon = document.createElement('div')
       icon.className = 'md-reader__folder-empty-icon'
-      icon.innerHTML = `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg>`
+      icon.innerHTML = this.folderSvg(36, 1.8)
 
       const title = document.createElement('div')
       title.className = 'md-reader__folder-empty-title'
-      title.textContent = this.localize('no_folder_selected')
+      title.textContent = this.rootNode
+        ? this.localize('no_files_found')
+        : this.localize('no_folder_selected')
 
       const desc = document.createElement('div')
       desc.className = 'md-reader__folder-empty-desc'
@@ -247,9 +619,9 @@ export class FolderManager {
       const openBtn = document.createElement('button')
       openBtn.className = 'md-reader__folder-open-btn'
       openBtn.type = 'button'
-      openBtn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg> <span>${this.localize('btn_open_folder')}</span>`
+      openBtn.innerHTML = `${this.folderSvg(15)} <span>${this.localize(
+        'btn_open_folder',
+      )}</span>`
       openBtn.onclick = e => {
         e.preventDefault()
         e.stopPropagation()
@@ -260,7 +632,24 @@ export class FolderManager {
       emptyDiv.appendChild(title)
       emptyDiv.appendChild(desc)
       emptyDiv.appendChild(openBtn)
+      const notice = this.renderNotice()
+      notice && emptyDiv.appendChild(notice)
       wrap.appendChild(emptyDiv)
+
+      // Recent folders quick pick
+      if (this.fsAccess && this.recents.length > 0) {
+        const recentWrap = document.createElement('div')
+        recentWrap.className = className.FOLDER_RECENT
+        const heading = document.createElement('div')
+        heading.className = 'md-reader__folder-recent-title'
+        heading.innerHTML = `${this.clockSvg(12)}<span>${this.localize(
+          'recent_folders',
+        )}</span>`
+        recentWrap.appendChild(heading)
+        recentWrap.appendChild(this.renderRecentList())
+        wrap.appendChild(recentWrap)
+      }
+
       this.container.appendChild(wrap)
       return
     }
@@ -271,12 +660,30 @@ export class FolderManager {
 
     const rootInfo = document.createElement('div')
     rootInfo.className = 'md-reader__folder-root-info'
-    rootInfo.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-    </svg><span class="md-reader__folder-root-name" title="${this.rootNode.name}">${this.rootNode.name}</span>`
+    rootInfo.innerHTML = `${this.folderSvg(
+      14,
+    )}<span class="md-reader__folder-root-name" title="${this.rootNode.name}">${
+      this.rootNode.name
+    }</span>`
 
     const actions = document.createElement('div')
     actions.className = 'md-reader__folder-actions'
+
+    if (this.fsAccess) {
+      const recentBtn = document.createElement('button')
+      recentBtn.className = 'md-reader__folder-action-btn'
+      if (this.showRecents) recentBtn.classList.add('active')
+      recentBtn.type = 'button'
+      recentBtn.title = this.localize('recent_folders')
+      recentBtn.innerHTML = this.clockSvg(13)
+      recentBtn.onclick = e => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.showRecents = !this.showRecents
+        this.render()
+      }
+      actions.appendChild(recentBtn)
+    }
 
     const changeBtn = document.createElement('button')
     changeBtn.className = 'md-reader__folder-action-btn'
@@ -293,7 +700,7 @@ export class FolderManager {
     closeBtn.className = 'md-reader__folder-action-btn'
     closeBtn.type = 'button'
     closeBtn.title = this.localize('btn_close_folder')
-    closeBtn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+    closeBtn.innerHTML = this.closeSvg(13)
     closeBtn.onclick = e => {
       e.preventDefault()
       e.stopPropagation()
@@ -305,6 +712,17 @@ export class FolderManager {
     header.appendChild(rootInfo)
     header.appendChild(actions)
     wrap.appendChild(header)
+
+    // Recent folders dropdown
+    if (this.showRecents) {
+      const recentWrap = document.createElement('div')
+      recentWrap.className = `${className.FOLDER_RECENT} dropdown`
+      recentWrap.appendChild(this.renderRecentList())
+      wrap.appendChild(recentWrap)
+    }
+
+    const notice = this.renderNotice()
+    notice && wrap.appendChild(notice)
 
     // Search Input
     const searchWrap = document.createElement('div')
@@ -357,7 +775,11 @@ export class FolderManager {
           ? className.FOLDER_ITEM_DIR
           : className.FOLDER_ITEM_FILE
       }`
-      if (!node.isDirectory && node.path === this.activePath) {
+      if (
+        !node.isDirectory &&
+        this.activeNode &&
+        node.path === this.activeNode.path
+      ) {
         li.classList.add(className.FOLDER_ITEM_ACTIVE)
       }
 
@@ -375,7 +797,7 @@ export class FolderManager {
 
         const folderIcon = document.createElement('span')
         folderIcon.className = 'md-reader__folder-node-icon'
-        folderIcon.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+        folderIcon.innerHTML = this.folderSvg(14)
 
         const label = document.createElement('span')
         label.className = 'md-reader__folder-label'

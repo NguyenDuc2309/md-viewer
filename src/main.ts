@@ -182,14 +182,24 @@ function main(data: Data) {
   sideTabs.append([tabOutline, tabFolder])
   mdSide.append([sideTabs, sideOutlinePanel, sideFolderPanel])
 
+  const pageRaw = mdRaw
   folderManager = new FolderManager(
     sideFolderPanel.ele,
-    (content: string, fileName: string) => {
-      mdRaw = content
-      contentRender(content)
-      document.title = fileName
-      renderSide()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+    {
+      onFileSelected(content: string, fileName: string) {
+        mdRaw = content
+        contentRender(content)
+        document.title = fileName
+        renderSide()
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      },
+      onFolderClosed() {
+        // Restore the document this page was opened with
+        mdRaw = pageRaw
+        contentRender(pageRaw)
+        renderSide()
+        window.scrollTo({ top: 0 })
+      },
     },
     configData.language,
   )
@@ -308,8 +318,19 @@ function main(data: Data) {
   }
 
   function polling() {
-    void (function watch() {
+    void (async function watch() {
       clearTimeout(pollingTimer)
+      // A file picked from the folder tree is watched through its handle
+      if (folderManager?.hasActiveFile()) {
+        const res = await folderManager.readActiveFileIfChanged()
+        if (res !== null && res !== mdRaw) {
+          mdRaw = res
+          contentRender(res)
+          renderSide()
+        }
+        pollingTimer = setTimeout(watch, 500)
+        return
+      }
       chrome.runtime.sendMessage({ action: 'fetch' }, res => {
         if (res !== undefined) {
           if (mdRaw === undefined || mdRaw === null) {
