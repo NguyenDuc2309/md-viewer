@@ -185,35 +185,36 @@ function main(data: Data) {
   sideTabs.append([tabOutline, tabFolder])
   mdSide.append([sideTabs, sideOutlinePanel, sideFolderPanel])
 
-  if (window.location.protocol === 'file:') {
-    // Local files: browse by path, no picker / permission prompt needed
-    folderManager = new PathFolderManager(
-      sideFolderPanel.ele,
-      configData.language,
-    )
-  } else {
-    const pageRaw = mdRaw
-    folderManager = new FolderManager(
-      sideFolderPanel.ele,
-      {
-        onFileSelected(content: string, fileName: string) {
-          mdRaw = content
-          contentRender(content)
-          document.title = fileName
-          renderSide()
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        },
-        onFolderClosed() {
-          // Restore the document this page was opened with
-          mdRaw = pageRaw
-          contentRender(pageRaw)
-          renderSide()
-          window.scrollTo({ top: 0 })
-        },
-      },
-      configData.language,
-    )
+  const pageRaw = mdRaw
+  const folderCallbacks = {
+    onFileSelected(content: string, fileName: string) {
+      mdRaw = content
+      contentRender(content)
+      document.title = fileName
+      renderSide()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    },
+    onFolderClosed() {
+      // Restore the document this page was opened with
+      mdRaw = pageRaw
+      contentRender(pageRaw)
+      renderSide()
+      window.scrollTo({ top: 0 })
+    },
   }
+  folderManager =
+    window.location.protocol === 'file:'
+      ? // Local files: remembered by path, no picker needed on later visits
+        new PathFolderManager(
+          sideFolderPanel.ele,
+          folderCallbacks,
+          configData.language,
+        )
+      : new FolderManager(
+          sideFolderPanel.ele,
+          folderCallbacks,
+          configData.language,
+        )
 
   let idCache: { [content: string]: number } = Object.create(null)
   let headElements: HTMLElement[] = []

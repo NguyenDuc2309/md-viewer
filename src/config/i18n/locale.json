@@ -39,7 +39,7 @@
     "placeholder_search": "Filter files...",
     "no_folder_selected": "No folder selected",
     "no_files_found": "No markdown files found",
-    "folder_desc": "Select a local directory to browse and switch markdown files.",
+    "folder_desc": "Open a folder once and its markdown files stay in this tree for every file you open later.",
     "warning_message": "Open the details page of extension \"md-reader\" and active \"allow access to file URLs\".",
     "recent_folders": "Recent folders",
     "no_recent_folders": "No recent folders",
@@ -47,11 +47,7 @@
     "folder_loading": "Reading folder...",
     "folder_not_found": "Folder is no longer accessible.",
     "folder_permission_denied": "Access to the folder was denied.",
-    "folder_desc_path": "Pick a folder to browse its markdown files. Everything is read straight from disk, nothing is uploaded.",
-    "open_parent_folder": "Folders of current file",
-    "btn_parent_folder": "Go to parent folder",
-    "btn_cancel": "Cancel",
-    "placeholder_folder_path": "Folder path, e.g. /home/me/notes"
+    "folder_not_remembered": "Folder location could not be resolved, so it won't be remembered next time."
   },
   "zh-CN": {
     "label_enable": "启用",
@@ -84,7 +80,7 @@
     "placeholder_search": "搜索文件...",
     "no_folder_selected": "未选择文件夹",
     "no_files_found": "未找到 Markdown 文件",
-    "folder_desc": "选择本地目录浏览并切换 Markdown 文件。",
+    "folder_desc": "打开一次文件夹，之后打开任意文件时目录树都会自动恢复。",
     "warning_message": "请在 “md-reader” 扩展程序的 “详情” 中开启 “允许访问文件网址” 权限。",
     "recent_folders": "最近打开",
     "no_recent_folders": "暂无最近打开的文件夹",
@@ -92,11 +88,7 @@
     "folder_loading": "正在读取文件夹...",
     "folder_not_found": "文件夹已无法访问。",
     "folder_permission_denied": "文件夹访问被拒绝。",
-    "folder_desc_path": "选择一个文件夹浏览其中的 Markdown 文件，内容直接从本地读取，不会上传。",
-    "open_parent_folder": "当前文件所在目录",
-    "btn_parent_folder": "上级文件夹",
-    "btn_cancel": "取消",
-    "placeholder_folder_path": "文件夹路径，如 /home/me/notes"
+    "folder_not_remembered": "无法确定文件夹位置，下次将不会自动恢复。"
   },
   "zh-TW": {
     "label_enable": "啟用",
@@ -129,7 +121,7 @@
     "placeholder_search": "搜尋檔案...",
     "no_folder_selected": "未選擇資料夾",
     "no_files_found": "未找到 Markdown 檔案",
-    "folder_desc": "選擇本機目錄瀏覽並切換 Markdown 檔案。",
+    "folder_desc": "開啟一次資料夾，之後開啟任意檔案時目錄樹都會自動恢復。",
     "warning_message": "請在 “md-reader” 扩展程序的 “詳情” 中開啟 “允許訪問文件網址” 權限。",
     "recent_folders": "最近開啟",
     "no_recent_folders": "暫無最近開啟的資料夾",
@@ -137,11 +129,7 @@
     "folder_loading": "正在讀取資料夾...",
     "folder_not_found": "資料夾已無法存取。",
     "folder_permission_denied": "資料夾存取被拒絕。",
-    "folder_desc_path": "選擇一個資料夾瀏覽其中的 Markdown 檔案，內容直接從本機讀取，不會上傳。",
-    "open_parent_folder": "目前檔案所在目錄",
-    "btn_parent_folder": "上層資料夾",
-    "btn_cancel": "取消",
-    "placeholder_folder_path": "資料夾路徑，如 /home/me/notes"
+    "folder_not_remembered": "無法確定資料夾位置，下次將不會自動恢復。"
   },
   "ko": {
     "label_enable": "활성화",
@@ -174,7 +162,7 @@
     "placeholder_search": "파일 검색...",
     "no_folder_selected": "폴더가 선택되지 않음",
     "no_files_found": "Markdown 파일을 찾을 수 없습니다",
-    "folder_desc": "로컬 폴더를 열어 Markdown 파일을 탐색하세요.",
+    "folder_desc": "폴더를 한 번 열면 이후 어떤 파일을 열어도 트리가 유지됩니다.",
     "warning_message": "확장 프로그램 \"md-reader\" 의 세부 정보 페이지를 열고 \"파일 URL에 대한 액세스 허용\"을 활성화 하세요.",
     "recent_folders": "최근 폴더",
     "no_recent_folders": "최근 폴더가 없습니다",
@@ -182,11 +170,7 @@
     "folder_loading": "폴더를 읽는 중...",
     "folder_not_found": "폴더에 더 이상 접근할 수 없습니다.",
     "folder_permission_denied": "폴더 접근이 거부되었습니다.",
-    "folder_desc_path": "폴더를 선택해 Markdown 파일을 탐색하세요. 디스크에서 직접 읽으며 업로드하지 않습니다.",
-    "open_parent_folder": "현재 파일의 폴더",
-    "btn_parent_folder": "상위 폴더로",
-    "btn_cancel": "취소",
-    "placeholder_folder_path": "폴더 경로, 예: /home/me/notes"
+    "folder_not_remembered": "폴더 위치를 확인할 수 없어 다음에는 기억되지 않습니다."
   },
   "uk": {
     "label_enable": "Увімкнути",
@@ -219,7 +203,7 @@
     "placeholder_search": "Пошук файлів...",
     "no_folder_selected": "Папку не вибрано",
     "no_files_found": "Файлів Markdown не знайдено",
-    "folder_desc": "Виберіть папку для перегляду файлів Markdown.",
+    "folder_desc": "Відкрийте папку один раз — дерево залишиться для всіх файлів, які ви відкриєте пізніше.",
     "warning_message": "Відкрийте сторінку керування розширенням «md-reader» та активуйте «Надавати доступ до URL-адрес файлу».",
     "recent_folders": "Останні папки",
     "no_recent_folders": "Немає останніх папок",
@@ -227,10 +211,6 @@
     "folder_loading": "Читання папки...",
     "folder_not_found": "Папка більше недоступна.",
     "folder_permission_denied": "У доступі до папки відмовлено.",
-    "folder_desc_path": "Виберіть папку для перегляду файлів Markdown. Усе читається з диска, нічого не завантажується.",
-    "open_parent_folder": "Папки поточного файлу",
-    "btn_parent_folder": "До батьківської папки",
-    "btn_cancel": "Скасувати",
-    "placeholder_folder_path": "Шлях до папки, напр. /home/me/notes"
+    "folder_not_remembered": "Не вдалося визначити розташування папки, наступного разу її не буде відновлено."
   }
 }

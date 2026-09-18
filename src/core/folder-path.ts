@@ -9,20 +9,25 @@ import {
   revealActive,
   shouldSkipDir,
   sortNodes,
+  sortTree,
 } from '@/core/folder-tree'
 
 /**
  * Folder browser for local `file://` pages.
  *
- * No picker and no permission prompt: the extension already has read access to
- * file URLs, so directories are listed by fetching Chrome's directory listing
- * through the background script. The chosen root is persisted in
- * chrome.storage and files are opened by navigating to their file:// URL, so
- * the tree survives reloads and the current document is always highlighted.
+ * "Open Folder" shows the browser's folder picker. The picked folder's absolute
+ * location is inferred from the file open in this tab, then persisted in
+ * chrome.storage (plus a recent list). From then on the tree is rebuilt on
+ * every page load by listing the directory through the background script (an
+ * offscreen document fetches Chrome's file:// directory listing), and files are
+ * opened by navigating to their URL, so the current document is always
+ * highlighted and no picker or permission prompt is needed again.
  */
 
 const MAX_RECENT = 10
 const MAX_SEARCH_DIRS = 400
+const MAX_SIBLING_SCAN = 6
+const MAX_SCAN_LISTINGS = 120
 const STORAGE_ROOT = 'folderRoot'
 const STORAGE_EXPANDED = 'folderExpanded'
 const STORAGE_RECENT = 'recentFolders'
@@ -30,6 +35,12 @@ const STORAGE_RECENT = 'recentFolders'
 interface DirEntry {
   name: string
   isDir: boolean
+}
+
+interface PathFolderCallbacks {
+  /** Only used when the picked folder's location could not be resolved */
+  onFileSelected: (content: string, name: string, path: string) => void
+  onFolderClosed?: () => void
 }
 
 function storageGet<T = any>(keys: string[]): Promise<T> {
@@ -67,59 +78,71 @@ function parentOf(dirUrl: string): string | null {
   return parent.length >= 'file:///'.length ? parent : 'file:///'
 }
 
-function nameOf(dirUrl: string): string {
-  const trimmed = dirUrl.replace(/\/+$/, '')
-  const seg = trimmed.slice(trimmed.lastIndexOf('/') + 1)
+function decode(s: string): string {
   try {
-    return decodeURIComponent(seg) || '/'
+    return decodeURIComponent(s)
   } catch {
-    return seg || '/'
+    return s
   }
 }
 
-/** "/home/me/docs" | "C:\\docs" | "file:///x" -> file:// directory url */
-function pathToUrl(input: string): string | null {
-  let p = input.trim()
-  if (!p) return null
-  if (/^file:\/\//i.test(p)) return p.endsWith('/') ? p : p + '/'
-  p = p.replace(/\\/g, '/')
-  if (/^[a-zA-Z]:\//.test(p)) p = '/' + p
-  if (!p.startsWith('/')) return null
-  const url =
-    'file://' +
-    p
-      .split('/')
-      .map(seg => encodeURIComponent(seg).replace(/%3A/gi, ':'))
-      .join('/')
-  return url.endsWith('/') ? url : url + '/'
+function nameOf(dirUrl: string): string {
+  const trimmed = dirUrl.replace(/\/+$/, '')
+  return decode(trimmed.slice(trimmed.lastIndexOf('/') + 1)) || '/'
 }
 
 function displayPath(url: string): string {
-  try {
-    return decodeURIComponent(url.replace(/^file:\/\//, ''))
-  } catch {
-    return url
-  }
+  return decode(url.replace(/^file:\/\//, ''))
+}
+
+/** Compare two file:// urls ignoring percent-encoding differences */
+function sameUrl(a: string, b: string): boolean {
+  return decode(a) === decode(b)
 }
 
 export class PathFolderManager {
   private rootUrl: string | null = null
   private rootNode: FileTreeNode | null = null
+  /** Tree built from picked File objects when the location is unknown */
+  private memoryMode: boolean = false
+  private activeMemoryPath: string | null = null
   private expanded: Set<string> = new Set()
   private recents: string[] = []
   private searchQuery: string = ''
   private showRecents: boolean = false
-  private choosing: boolean = false
   private loading: boolean = false
   private notice: string = ''
   private fullyLoaded: boolean = false
   private localize: (key: string) => string = i18n()
   private container: HTMLElement
+  private fileInput: HTMLInputElement
+  private callbacks: PathFolderCallbacks
   private currentFile: string = window.location.href.split(/[?#]/)[0]
 
-  constructor(container: HTMLElement, language?: string) {
+  constructor(
+    container: HTMLElement,
+    callbacks: PathFolderCallbacks,
+    language?: string,
+  ) {
     this.container = container
+    this.callbacks = callbacks
     this.localize = i18n(language)
+
+    // Native folder picker (kept synchronous so the click gesture is preserved)
+    this.fileInput = document.createElement('input')
+    this.fileInput.type = 'file'
+    // @ts-ignore
+    this.fileInput.webkitdirectory = true
+    // @ts-ignore
+    this.fileInput.directory = true
+    this.fileInput.multiple = true
+    this.fileInput.style.display = 'none'
+    this.fileInput.addEventListener('change', () => {
+      const files = this.fileInput.files
+      if (files && files.length > 0) this.onFolderPicked(files)
+    })
+    document.body.appendChild(this.fileInput)
+
     this.render()
     this.restore()
   }
@@ -127,6 +150,11 @@ export class PathFolderManager {
   public setLanguage(language?: string) {
     this.localize = i18n(language)
     this.render()
+  }
+
+  public pickFolder() {
+    this.fileInput.value = ''
+    this.fileInput.click()
   }
 
   /* ---------- persistence ---------- */
@@ -172,16 +200,153 @@ export class PathFolderManager {
     this.render()
   }
 
-  /* ---------- opening ---------- */
+  /* ---------- picking ---------- */
+
+  private async onFolderPicked(files: FileList) {
+    this.loading = true
+    this.notice = ''
+    this.render()
+    const rootUrl = await this.inferRootUrl(files).catch(() => null)
+    if (rootUrl) {
+      await this.openRoot(rootUrl)
+      return
+    }
+    // Location unknown: browse the picked files in memory for this page only
+    this.loading = false
+    this.memoryMode = true
+    this.rootUrl = null
+    this.rootNode = this.buildTreeFromFileList(files)
+    this.activeMemoryPath = null
+    this.searchQuery = ''
+    this.notice = this.localize('folder_not_remembered')
+    this.render()
+  }
+
+  /**
+   * Work out the absolute file:// url of the picked folder. The picker only
+   * gives paths relative to the folder, so: (1) if the file open in this tab
+   * is inside the folder, align the two paths; (2) otherwise look for a folder
+   * with the same name and contents next to the current file or its parents.
+   */
+  private async inferRootUrl(files: FileList): Promise<string | null> {
+    const firstRel = files[0].webkitRelativePath
+    if (!firstRel) return null
+    const rootName = firstRel.split('/')[0]
+    const curSegs = this.currentFile.split('/')
+
+    // (1) current file lives inside the picked folder
+    for (let i = 0; i < files.length; i++) {
+      const relSegs = files[i].webkitRelativePath.split('/')
+      if (relSegs.length > curSegs.length) continue
+      const tail = curSegs.slice(curSegs.length - relSegs.length)
+      if (tail.every((seg, j) => decode(seg) === relSegs[j])) {
+        return (
+          curSegs.slice(0, curSegs.length - relSegs.length + 1).join('/') + '/'
+        )
+      }
+    }
+
+    // (2) look for a folder named rootName near the current file: in each
+    // parent directory and one level below it (bounded number of listings)
+    const topNames = new Set<string>()
+    for (let i = 0; i < files.length; i++) {
+      const segs = files[i].webkitRelativePath.split('/')
+      if (segs.length > 1) topNames.add(segs[1])
+    }
+    let budget = MAX_SCAN_LISTINGS
+    const list = async (url: string): Promise<DirEntry[] | null> => {
+      if (budget-- <= 0) return null
+      return listDir(url).catch(() => null)
+    }
+    const matches = async (candidate: string) => {
+      const entries = await list(candidate)
+      if (!entries) return false
+      const names = new Set(entries.map(e => e.name))
+      return Array.from(topNames).every(n => names.has(n))
+    }
+    let dir: string | null = dirOf(this.currentFile)
+    for (let depth = 0; dir && depth < MAX_SIBLING_SCAN; depth++) {
+      const entries = await list(dir)
+      if (!entries) break
+      const dirs = entries.filter(e => e.isDir && !shouldSkipDir(e.name))
+      const direct = dirs.find(e => e.name === rootName)
+      if (direct) {
+        const candidate = dir + encodeURIComponent(rootName) + '/'
+        if (await matches(candidate)) return candidate
+      }
+      for (const sub of dirs) {
+        if (sub.name === rootName) continue
+        const subUrl = dir + encodeURIComponent(sub.name) + '/'
+        const subEntries = await list(subUrl)
+        if (!subEntries) break
+        if (subEntries.some(e => e.isDir && e.name === rootName)) {
+          const candidate = subUrl + encodeURIComponent(rootName) + '/'
+          if (await matches(candidate)) return candidate
+        }
+      }
+      dir = parentOf(dir)
+    }
+    return null
+  }
+
+  private buildTreeFromFileList(files: FileList): FileTreeNode {
+    const rootName = files[0].webkitRelativePath.split('/')[0] || 'Folder'
+    const root: FileTreeNode = {
+      name: rootName,
+      path: rootName,
+      isDirectory: true,
+      children: [],
+      expanded: true,
+    }
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (!isMarkdownFile(file.name)) continue
+      const parts = (file.webkitRelativePath || file.name).split('/')
+      if (parts.slice(0, -1).some(shouldSkipDir)) continue
+      let node = root
+      let path = parts[0]
+      for (let j = 1; j < parts.length; j++) {
+        path += `/${parts[j]}`
+        if (j === parts.length - 1) {
+          node.children.push({
+            name: parts[j],
+            path,
+            isDirectory: false,
+            fileObj: file,
+          })
+        } else {
+          let next = node.children.find(
+            c => c.isDirectory && c.name === parts[j],
+          )
+          if (!next) {
+            next = {
+              name: parts[j],
+              path,
+              isDirectory: true,
+              children: [],
+              expanded: true,
+            }
+            node.children.push(next)
+          }
+          node = next
+        }
+      }
+    }
+    sortTree(root)
+    return root
+  }
+
+  /* ---------- opening by path ---------- */
 
   public async openRoot(url: string, remember: boolean = true) {
     if (!url.endsWith('/')) url += '/'
     this.loading = true
     this.notice = ''
-    this.choosing = false
     this.showRecents = false
     this.searchQuery = ''
     this.fullyLoaded = false
+    this.memoryMode = false
+    this.activeMemoryPath = null
     this.render()
 
     const node: FileTreeNode = {
@@ -215,13 +380,18 @@ export class PathFolderManager {
   }
 
   public closeFolder() {
+    const hadMemoryFile = this.memoryMode && !!this.activeMemoryPath
     this.rootUrl = null
     this.rootNode = null
+    this.memoryMode = false
+    this.activeMemoryPath = null
     this.expanded = new Set()
     this.notice = ''
     this.searchQuery = ''
+    this.fileInput.value = ''
     storageSet({ [STORAGE_ROOT]: null })
     this.render()
+    if (hadMemoryFile) this.callbacks.onFolderClosed?.()
   }
 
   private async loadChildren(node: FileTreeNode) {
@@ -262,14 +432,15 @@ export class PathFolderManager {
   /** Expand the directories leading to the file currently open in this tab */
   private async expandToCurrentFile() {
     if (!this.rootNode || !this.rootUrl) return
-    if (!this.currentFile.startsWith(this.rootUrl)) return
-    const rel = this.currentFile.slice(this.rootUrl.length)
-    const segments = rel.split('/').slice(0, -1)
+    const cur = decode(this.currentFile)
+    const root = decode(this.rootUrl)
+    if (!cur.startsWith(root)) return
+    const segments = cur.slice(root.length).split('/').slice(0, -1)
     let node = this.rootNode
     for (const seg of segments) {
       if (!node.loaded) await this.loadChildren(node)
       const next = node.children?.find(
-        c => c.isDirectory && c.url === node.url + seg + '/',
+        c => c.isDirectory && sameUrl(c.url, node.url + seg + '/'),
       )
       if (!next) return
       next.expanded = true
@@ -282,7 +453,7 @@ export class PathFolderManager {
 
   /** Load the whole tree (bounded) so search can match nested files */
   private async ensureFullyLoaded() {
-    if (this.fullyLoaded || !this.rootNode) return
+    if (this.fullyLoaded || !this.rootNode || this.memoryMode) return
     this.fullyLoaded = true
     let count = 0
     const walk = async (node: FileTreeNode) => {
@@ -299,6 +470,10 @@ export class PathFolderManager {
 
   private async toggleDir(node: FileTreeNode) {
     node.expanded = !node.expanded
+    if (this.memoryMode) {
+      this.render()
+      return
+    }
     if (node.expanded) {
       this.expanded.add(node.url)
       if (!node.loaded) {
@@ -317,8 +492,19 @@ export class PathFolderManager {
     this.render()
   }
 
-  private selectFile(node: FileTreeNode) {
-    if (!node.url || node.url === this.currentFile) return
+  private async selectFile(node: FileTreeNode) {
+    if (node.fileObj) {
+      try {
+        const content = await node.fileObj.text()
+        this.activeMemoryPath = node.path
+        this.callbacks.onFileSelected(content, node.name, node.path)
+        this.render()
+      } catch (err) {
+        console.error('Error reading markdown file:', err)
+      }
+      return
+    }
+    if (!node.url || sameUrl(node.url, this.currentFile)) return
     window.location.href = node.url
   }
 
@@ -373,38 +559,6 @@ export class PathFolderManager {
     return list
   }
 
-  /** Ancestor directories of the current file, nearest first */
-  private renderAncestorList(): HTMLElement {
-    const list = document.createElement('ul')
-    list.className = className.FOLDER_RECENT_LIST
-    let dir: string | null = dirOf(this.currentFile)
-    let depth = 0
-    while (dir && depth < 8) {
-      const url = dir
-      const li = document.createElement('li')
-      li.className = className.FOLDER_RECENT_ITEM
-      if (url === this.rootUrl) li.classList.add('current')
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'md-reader__folder-recent-open'
-      btn.title = displayPath(url)
-      btn.innerHTML = `${icons.folder(
-        13,
-      )}<span class="md-reader__folder-label"></span>`
-      btn.querySelector('span').textContent = displayPath(url)
-      btn.onclick = e => {
-        e.preventDefault()
-        e.stopPropagation()
-        this.openRoot(url)
-      }
-      li.appendChild(btn)
-      list.appendChild(li)
-      dir = parentOf(dir)
-      depth++
-    }
-    return list
-  }
-
   private renderNotice(): HTMLElement | null {
     if (!this.notice) return null
     const el = document.createElement('div')
@@ -413,7 +567,7 @@ export class PathFolderManager {
     return el
   }
 
-  private renderChooser(wrap: HTMLElement) {
+  private renderEmpty(wrap: HTMLElement) {
     const emptyDiv = document.createElement('div')
     emptyDiv.className = className.FOLDER_EMPTY
 
@@ -423,79 +577,45 @@ export class PathFolderManager {
 
     const title = document.createElement('div')
     title.className = 'md-reader__folder-empty-title'
-    title.textContent = this.localize(
-      this.choosing ? 'btn_open_folder' : 'no_folder_selected',
-    )
+    title.textContent = this.rootNode
+      ? this.localize('no_files_found')
+      : this.localize('no_folder_selected')
 
     const desc = document.createElement('div')
     desc.className = 'md-reader__folder-empty-desc'
-    desc.textContent = this.localize('folder_desc_path')
+    desc.textContent = this.localize('folder_desc')
 
-    // Path input + open button
-    const form = document.createElement('form')
-    form.className = 'md-reader__folder-path-form'
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.spellcheck = false
-    input.placeholder = this.localize('placeholder_folder_path')
-    input.value = displayPath(this.rootUrl || dirOf(this.currentFile))
     const openBtn = document.createElement('button')
     openBtn.className = 'md-reader__folder-open-btn'
-    openBtn.type = 'submit'
+    openBtn.type = 'button'
     openBtn.innerHTML = `${icons.folder(15)} <span>${this.localize(
       'btn_open_folder',
     )}</span>`
-    form.appendChild(input)
-    form.appendChild(openBtn)
-    form.onsubmit = e => {
+    openBtn.onclick = e => {
       e.preventDefault()
-      const url = pathToUrl(input.value)
-      if (!url) {
-        this.notice = this.localize('folder_not_found')
-        this.render()
-        return
-      }
-      this.openRoot(url)
+      e.stopPropagation()
+      this.pickFolder()
     }
 
     emptyDiv.appendChild(icon)
     emptyDiv.appendChild(title)
     emptyDiv.appendChild(desc)
-    emptyDiv.appendChild(form)
+    emptyDiv.appendChild(openBtn)
     const notice = this.renderNotice()
     notice && emptyDiv.appendChild(notice)
     wrap.appendChild(emptyDiv)
 
-    if (this.choosing) {
-      const back = document.createElement('button')
-      back.type = 'button'
-      back.className = 'md-reader__folder-open-btn secondary'
-      back.innerHTML = `${icons.close(13)} <span>${this.localize(
-        'btn_cancel',
-      )}</span>`
-      back.onclick = () => {
-        this.choosing = false
-        this.render()
-      }
-      emptyDiv.appendChild(back)
-    }
-
-    const section = (titleKey: string, list: HTMLElement) => {
+    if (this.recents.length > 0) {
       const box = document.createElement('div')
       box.className = className.FOLDER_RECENT
       const heading = document.createElement('div')
       heading.className = 'md-reader__folder-recent-title'
-      heading.innerHTML = `${
-        titleKey === 'recent_folders' ? icons.clock(12) : icons.up(12)
-      }<span>${this.localize(titleKey)}</span>`
+      heading.innerHTML = `${icons.clock(12)}<span>${this.localize(
+        'recent_folders',
+      )}</span>`
       box.appendChild(heading)
-      box.appendChild(list)
+      box.appendChild(this.renderRecentList())
       wrap.appendChild(box)
-    }
-
-    section('open_parent_folder', this.renderAncestorList())
-    if (this.recents.length > 0) {
-      section('recent_folders', this.renderRecentList())
     }
   }
 
@@ -513,8 +633,12 @@ export class PathFolderManager {
       return
     }
 
-    if (!this.rootNode || this.choosing) {
-      this.renderChooser(wrap)
+    if (
+      !this.rootNode ||
+      !this.rootNode.children ||
+      this.rootNode.children.length === 0
+    ) {
+      this.renderEmpty(wrap)
       this.container.appendChild(wrap)
       return
     }
@@ -550,12 +674,6 @@ export class PathFolderManager {
       return btn
     }
 
-    const parent = parentOf(this.rootUrl)
-    if (parent) {
-      action(this.localize('btn_parent_folder'), icons.up(13), () =>
-        this.openRoot(parent),
-      )
-    }
     const recentBtn = action(
       this.localize('recent_folders'),
       icons.clock(13),
@@ -565,10 +683,9 @@ export class PathFolderManager {
       },
     )
     if (this.showRecents) recentBtn.classList.add('active')
-    action(this.localize('btn_change_folder'), icons.change(13), () => {
-      this.choosing = true
-      this.render()
-    })
+    action(this.localize('btn_change_folder'), icons.change(13), () =>
+      this.pickFolder(),
+    )
     action(this.localize('btn_close_folder'), icons.close(13), () =>
       this.closeFolder(),
     )
@@ -625,7 +742,9 @@ export class PathFolderManager {
     }
 
     renderNodeChildren(filtered.children, treeList, 0, {
-      activePath: displayPath(this.currentFile),
+      activePath: this.memoryMode
+        ? this.activeMemoryPath
+        : displayPath(this.currentFile),
       onToggleDir: node => this.toggleDir(node),
       onSelectFile: node => this.selectFile(node),
       loadingText: this.localize('folder_loading'),
