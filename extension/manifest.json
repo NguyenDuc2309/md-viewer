@@ -26,7 +26,7 @@
     "default_title": "md-reader",
     "default_popup": "popup.html"
   },
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "offscreen"],
   "host_permissions": ["*://*/*"],
   "content_scripts": [
     {

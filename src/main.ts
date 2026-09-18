@@ -166,18 +166,20 @@ function main(data: Data) {
   }
   updateTabLabels()
 
-  tabOutline.on('click', () => {
-    tabOutline.classList.add(className.SIDE_TAB_ITEM_ACTIVE)
-    tabFolder.classList.remove(className.SIDE_TAB_ITEM_ACTIVE)
-    sideOutlinePanel.show()
-    sideFolderPanel.hide()
-  })
-
-  tabFolder.on('click', () => {
-    tabFolder.classList.add(className.SIDE_TAB_ITEM_ACTIVE)
-    tabOutline.classList.remove(className.SIDE_TAB_ITEM_ACTIVE)
-    sideOutlinePanel.hide()
-    sideFolderPanel.show()
+  const SIDE_TAB_KEY = 'sideTab'
+  function showSideTab(tab: 'outline' | 'folder', persist = true) {
+    const isFolder = tab === 'folder'
+    tabFolder.classList.toggle(className.SIDE_TAB_ITEM_ACTIVE, isFolder)
+    tabOutline.classList.toggle(className.SIDE_TAB_ITEM_ACTIVE, !isFolder)
+    sideOutlinePanel.toggle(!isFolder)
+    sideFolderPanel.toggle(isFolder)
+    if (persist) chrome.storage.local.set({ [SIDE_TAB_KEY]: tab })
+  }
+  tabOutline.on('click', () => showSideTab('outline'))
+  tabFolder.on('click', () => showSideTab('folder'))
+  // Remember which side tab was open so the folder tree stays put across navigation
+  chrome.storage.local.get([SIDE_TAB_KEY], res => {
+    if (res && res[SIDE_TAB_KEY] === 'folder') showSideTab('folder', false)
   })
 
   sideTabs.append([tabOutline, tabFolder])

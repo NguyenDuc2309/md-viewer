@@ -48,9 +48,10 @@
     "folder_not_found": "Folder is no longer accessible.",
     "folder_permission_denied": "Access to the folder was denied.",
     "folder_desc_path": "Pick a folder to browse its markdown files. Everything is read straight from disk, nothing is uploaded.",
-    "open_parent_folder": "Open folder",
+    "open_parent_folder": "Folders of current file",
     "btn_parent_folder": "Go to parent folder",
-    "btn_cancel": "Cancel"
+    "btn_cancel": "Cancel",
+    "placeholder_folder_path": "Folder path, e.g. /home/me/notes"
   },
   "zh-CN": {
     "label_enable": "启用",
@@ -92,9 +93,10 @@
     "folder_not_found": "文件夹已无法访问。",
     "folder_permission_denied": "文件夹访问被拒绝。",
     "folder_desc_path": "选择一个文件夹浏览其中的 Markdown 文件，内容直接从本地读取，不会上传。",
-    "open_parent_folder": "打开文件夹",
+    "open_parent_folder": "当前文件所在目录",
     "btn_parent_folder": "上级文件夹",
-    "btn_cancel": "取消"
+    "btn_cancel": "取消",
+    "placeholder_folder_path": "文件夹路径，如 /home/me/notes"
   },
   "zh-TW": {
     "label_enable": "啟用",
@@ -136,9 +138,10 @@
     "folder_not_found": "資料夾已無法存取。",
     "folder_permission_denied": "資料夾存取被拒絕。",
     "folder_desc_path": "選擇一個資料夾瀏覽其中的 Markdown 檔案，內容直接從本機讀取，不會上傳。",
-    "open_parent_folder": "開啟資料夾",
+    "open_parent_folder": "目前檔案所在目錄",
     "btn_parent_folder": "上層資料夾",
-    "btn_cancel": "取消"
+    "btn_cancel": "取消",
+    "placeholder_folder_path": "資料夾路徑，如 /home/me/notes"
   },
   "ko": {
     "label_enable": "활성화",
@@ -180,9 +183,10 @@
     "folder_not_found": "폴더에 더 이상 접근할 수 없습니다.",
     "folder_permission_denied": "폴더 접근이 거부되었습니다.",
     "folder_desc_path": "폴더를 선택해 Markdown 파일을 탐색하세요. 디스크에서 직접 읽으며 업로드하지 않습니다.",
-    "open_parent_folder": "폴더 열기",
+    "open_parent_folder": "현재 파일의 폴더",
     "btn_parent_folder": "상위 폴더로",
-    "btn_cancel": "취소"
+    "btn_cancel": "취소",
+    "placeholder_folder_path": "폴더 경로, 예: /home/me/notes"
   },
   "uk": {
     "label_enable": "Увімкнути",
@@ -224,8 +228,9 @@
     "folder_not_found": "Папка більше недоступна.",
     "folder_permission_denied": "У доступі до папки відмовлено.",
     "folder_desc_path": "Виберіть папку для перегляду файлів Markdown. Усе читається з диска, нічого не завантажується.",
-    "open_parent_folder": "Відкрити папку",
+    "open_parent_folder": "Папки поточного файлу",
     "btn_parent_folder": "До батьківської папки",
-    "btn_cancel": "Скасувати"
+    "btn_cancel": "Скасувати",
+    "placeholder_folder_path": "Шлях до папки, напр. /home/me/notes"
   }
 }

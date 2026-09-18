@@ -1,0 +1,1 @@
+(()=>{"use strict";var r={};chrome.runtime.onMessage.addListener(({action:n,data:s},c,t)=>{if(n==="offscreen:fetch")return fetch(s.url).then(e=>e.text()).then(e=>t({text:e})).catch(e=>t({error:String((e==null?void 0:e.message)||e)})),!0})})();

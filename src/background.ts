@@ -45,12 +45,55 @@ async function fetchData(url?: string) {
     return error.message
   }
 
-  return fetch(url)
-    .then(res => res.text())
-    .catch(err => {
-      console.error(err)
-      return err.message
+  return fetchText(url).catch(err => {
+    console.error(err)
+    return err.message
+  })
+}
+
+/** Read a URL as text; `file://` goes through the offscreen document. */
+async function fetchText(url: string): Promise<string> {
+  if (url.startsWith('file://')) return fetchViaOffscreen(url)
+  return fetch(url).then(res => res.text())
+}
+
+let offscreenCreating: Promise<void> | null = null
+
+async function ensureOffscreen() {
+  const offscreen = (chrome as any).offscreen
+  if (!offscreen) {
+    throw new Error('Offscreen documents are not supported by this browser.')
+  }
+  if (offscreenCreating) return offscreenCreating
+  offscreenCreating = offscreen
+    .createDocument({
+      url: 'offscreen.html',
+      reasons: ['DOM_PARSER'],
+      justification: 'Read local markdown files and directory listings',
     })
+    .catch((err: Error) => {
+      // Already exists from an earlier call - fine
+      if (!/single offscreen document/i.test(err.message)) throw err
+    })
+    .finally(() => {
+      offscreenCreating = null
+    })
+  return offscreenCreating
+}
+
+async function fetchViaOffscreen(url: string): Promise<string> {
+  await ensureOffscreen()
+  const ask = () =>
+    chrome.runtime.sendMessage({ action: 'offscreen:fetch', data: { url } })
+  // The document may still be booting right after creation - retry once
+  let res = await ask().catch(() => null)
+  if (!res) {
+    await new Promise(r => setTimeout(r, 150))
+    res = await ask().catch(() => null)
+  }
+  if (!res) throw new Error('Offscreen document did not respond.')
+  if (res.error) throw new Error(res.error)
+  return res.text
 }
 
 /**
@@ -61,9 +104,7 @@ async function listDir(url: string) {
   if (!url || !url.startsWith('file://')) {
     throw new Error('listDir: only file:// urls are supported')
   }
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`listDir: ${res.status}`)
-  const html = await res.text()
+  const html = await fetchViaOffscreen(url)
   const re = /addRow\(("(?:[^"\\]|\\.)*"),("(?:[^"\\]|\\.)*"),(\d)/g
   const entries: { name: string; isDir: boolean }[] = []
   let m: RegExpExecArray | null

@@ -77,6 +77,23 @@ function nameOf(dirUrl: string): string {
   }
 }
 
+/** "/home/me/docs" | "C:\\docs" | "file:///x" -> file:// directory url */
+function pathToUrl(input: string): string | null {
+  let p = input.trim()
+  if (!p) return null
+  if (/^file:\/\//i.test(p)) return p.endsWith('/') ? p : p + '/'
+  p = p.replace(/\\/g, '/')
+  if (/^[a-zA-Z]:\//.test(p)) p = '/' + p
+  if (!p.startsWith('/')) return null
+  const url =
+    'file://' +
+    p
+      .split('/')
+      .map(seg => encodeURIComponent(seg).replace(/%3A/gi, ':'))
+      .join('/')
+  return url.endsWith('/') ? url : url + '/'
+}
+
 function displayPath(url: string): string {
   try {
     return decodeURIComponent(url.replace(/^file:\/\//, ''))
@@ -406,15 +423,45 @@ export class PathFolderManager {
 
     const title = document.createElement('div')
     title.className = 'md-reader__folder-empty-title'
-    title.textContent = this.localize('no_folder_selected')
+    title.textContent = this.localize(
+      this.choosing ? 'btn_open_folder' : 'no_folder_selected',
+    )
 
     const desc = document.createElement('div')
     desc.className = 'md-reader__folder-empty-desc'
     desc.textContent = this.localize('folder_desc_path')
 
+    // Path input + open button
+    const form = document.createElement('form')
+    form.className = 'md-reader__folder-path-form'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.spellcheck = false
+    input.placeholder = this.localize('placeholder_folder_path')
+    input.value = displayPath(this.rootUrl || dirOf(this.currentFile))
+    const openBtn = document.createElement('button')
+    openBtn.className = 'md-reader__folder-open-btn'
+    openBtn.type = 'submit'
+    openBtn.innerHTML = `${icons.folder(15)} <span>${this.localize(
+      'btn_open_folder',
+    )}</span>`
+    form.appendChild(input)
+    form.appendChild(openBtn)
+    form.onsubmit = e => {
+      e.preventDefault()
+      const url = pathToUrl(input.value)
+      if (!url) {
+        this.notice = this.localize('folder_not_found')
+        this.render()
+        return
+      }
+      this.openRoot(url)
+    }
+
     emptyDiv.appendChild(icon)
     emptyDiv.appendChild(title)
     emptyDiv.appendChild(desc)
+    emptyDiv.appendChild(form)
     const notice = this.renderNotice()
     notice && emptyDiv.appendChild(notice)
     wrap.appendChild(emptyDiv)
@@ -422,7 +469,7 @@ export class PathFolderManager {
     if (this.choosing) {
       const back = document.createElement('button')
       back.type = 'button'
-      back.className = 'md-reader__folder-open-btn'
+      back.className = 'md-reader__folder-open-btn secondary'
       back.innerHTML = `${icons.close(13)} <span>${this.localize(
         'btn_cancel',
       )}</span>`
