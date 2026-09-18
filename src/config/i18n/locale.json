@@ -46,7 +46,11 @@
     "btn_remove_recent": "Remove from recent",
     "folder_loading": "Reading folder...",
     "folder_not_found": "Folder is no longer accessible.",
-    "folder_permission_denied": "Access to the folder was denied."
+    "folder_permission_denied": "Access to the folder was denied.",
+    "folder_desc_path": "Pick a folder to browse its markdown files. Everything is read straight from disk, nothing is uploaded.",
+    "open_parent_folder": "Open folder",
+    "btn_parent_folder": "Go to parent folder",
+    "btn_cancel": "Cancel"
   },
   "zh-CN": {
     "label_enable": "启用",
@@ -86,7 +90,11 @@
     "btn_remove_recent": "从最近列表移除",
     "folder_loading": "正在读取文件夹...",
     "folder_not_found": "文件夹已无法访问。",
-    "folder_permission_denied": "文件夹访问被拒绝。"
+    "folder_permission_denied": "文件夹访问被拒绝。",
+    "folder_desc_path": "选择一个文件夹浏览其中的 Markdown 文件，内容直接从本地读取，不会上传。",
+    "open_parent_folder": "打开文件夹",
+    "btn_parent_folder": "上级文件夹",
+    "btn_cancel": "取消"
   },
   "zh-TW": {
     "label_enable": "啟用",
@@ -126,7 +134,11 @@
     "btn_remove_recent": "從最近列表移除",
     "folder_loading": "正在讀取資料夾...",
     "folder_not_found": "資料夾已無法存取。",
-    "folder_permission_denied": "資料夾存取被拒絕。"
+    "folder_permission_denied": "資料夾存取被拒絕。",
+    "folder_desc_path": "選擇一個資料夾瀏覽其中的 Markdown 檔案，內容直接從本機讀取，不會上傳。",
+    "open_parent_folder": "開啟資料夾",
+    "btn_parent_folder": "上層資料夾",
+    "btn_cancel": "取消"
   },
   "ko": {
     "label_enable": "활성화",
@@ -166,7 +178,11 @@
     "btn_remove_recent": "최근 목록에서 제거",
     "folder_loading": "폴더를 읽는 중...",
     "folder_not_found": "폴더에 더 이상 접근할 수 없습니다.",
-    "folder_permission_denied": "폴더 접근이 거부되었습니다."
+    "folder_permission_denied": "폴더 접근이 거부되었습니다.",
+    "folder_desc_path": "폴더를 선택해 Markdown 파일을 탐색하세요. 디스크에서 직접 읽으며 업로드하지 않습니다.",
+    "open_parent_folder": "폴더 열기",
+    "btn_parent_folder": "상위 폴더로",
+    "btn_cancel": "취소"
   },
   "uk": {
     "label_enable": "Увімкнути",
@@ -206,6 +222,10 @@
     "btn_remove_recent": "Вилучити зі списку",
     "folder_loading": "Читання папки...",
     "folder_not_found": "Папка більше недоступна.",
-    "folder_permission_denied": "У доступі до папки відмовлено."
+    "folder_permission_denied": "У доступі до папки відмовлено.",
+    "folder_desc_path": "Виберіть папку для перегляду файлів Markdown. Усе читається з диска, нічого не завантажується.",
+    "open_parent_folder": "Відкрити папку",
+    "btn_parent_folder": "До батьківської папки",
+    "btn_cancel": "Скасувати"
   }
 }

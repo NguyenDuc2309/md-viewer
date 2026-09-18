@@ -1,15 +1,20 @@
 import className from '@/config/class-name'
 import i18n from '@/config/i18n'
+import {
+  type FileTreeNode,
+  filterNode,
+  icons,
+  isMarkdownFile,
+  renderNodeChildren,
+  shouldSkipDir,
+  sortTree,
+} from '@/core/folder-tree'
 
-export interface FileTreeNode {
-  name: string
-  path: string
-  isDirectory: boolean
-  children?: FileTreeNode[]
-  fileObj?: File
-  fileHandle?: FsFileHandle
-  expanded?: boolean
-}
+/**
+ * Folder browser for http(s) pages, backed by the File System Access API
+ * (directory handles persisted in IndexedDB for the recent list).
+ * `file://` pages use PathFolderManager instead.
+ */
 
 /* Minimal File System Access API typings (not fully covered by lib.dom in TS 4.x) */
 type FsPermission = 'granted' | 'denied' | 'prompt'
@@ -38,21 +43,10 @@ export interface RecentFolder {
   lastOpened: number
 }
 
-const MD_EXTENSIONS = ['.md', '.markdown', '.mkd', '.mdx']
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'target'])
 const MAX_RECENT = 10
 const MAX_DEPTH = 16
 const DB_NAME = 'md-reader'
 const DB_STORE = 'recent-folders'
-
-function isMarkdownFile(name: string): boolean {
-  const lower = name.toLowerCase()
-  return MD_EXTENSIONS.some(ext => lower.endsWith(ext))
-}
-
-function shouldSkipDir(name: string): boolean {
-  return name.startsWith('.') || SKIP_DIRS.has(name)
-}
 
 function hasFsAccess(): boolean {
   return typeof (window as any).showDirectoryPicker === 'function'
@@ -348,7 +342,7 @@ export class FolderManager {
         })
       }
     }
-    this.sortNode(node)
+    sortTree(node)
     return node
   }
 
@@ -420,19 +414,8 @@ export class FolderManager {
       }
     }
 
-    this.sortNode(root)
+    sortTree(root)
     return root
-  }
-
-  private sortNode(node: FileTreeNode) {
-    if (!node.children) return
-    node.children.sort((a, b) => {
-      if (a.isDirectory === b.isDirectory) {
-        return a.name.localeCompare(b.name, undefined, { numeric: true })
-      }
-      return a.isDirectory ? -1 : 1
-    })
-    node.children.forEach(c => this.sortNode(c))
   }
 
   /* ---------- selection ---------- */
@@ -475,51 +458,7 @@ export class FolderManager {
     if (hadActive) this.callbacks.onFolderClosed?.()
   }
 
-  private filterNode(node: FileTreeNode, query: string): FileTreeNode | null {
-    if (!query) return node
-
-    const lowerQuery = query.toLowerCase()
-    if (!node.isDirectory) {
-      return node.name.toLowerCase().includes(lowerQuery) ? node : null
-    }
-
-    const filteredChildren: FileTreeNode[] = []
-    if (node.children) {
-      for (const child of node.children) {
-        const filtered = this.filterNode(child, query)
-        if (filtered) {
-          filteredChildren.push(filtered)
-        }
-      }
-    }
-
-    if (
-      filteredChildren.length > 0 ||
-      node.name.toLowerCase().includes(lowerQuery)
-    ) {
-      return {
-        ...node,
-        children: filteredChildren,
-        expanded: true,
-      }
-    }
-
-    return null
-  }
-
   /* ---------- rendering ---------- */
-
-  private folderSvg(size: number, strokeWidth = 2) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
-  }
-
-  private clockSvg(size: number) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`
-  }
-
-  private closeSvg(size: number) {
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
-  }
 
   private renderRecentList(): HTMLElement {
     const list = document.createElement('ul')
@@ -544,7 +483,7 @@ export class FolderManager {
       btn.type = 'button'
       btn.className = 'md-reader__folder-recent-open'
       btn.title = recent.name
-      btn.innerHTML = `${this.folderSvg(
+      btn.innerHTML = `${icons.folder(
         13,
       )}<span class="md-reader__folder-label">${recent.name}</span>`
       btn.onclick = e => {
@@ -557,7 +496,7 @@ export class FolderManager {
       remove.type = 'button'
       remove.className = 'md-reader__folder-recent-remove'
       remove.title = this.localize('btn_remove_recent')
-      remove.innerHTML = this.closeSvg(11)
+      remove.innerHTML = icons.close(11)
       remove.onclick = e => {
         e.preventDefault()
         e.stopPropagation()
@@ -604,7 +543,7 @@ export class FolderManager {
 
       const icon = document.createElement('div')
       icon.className = 'md-reader__folder-empty-icon'
-      icon.innerHTML = this.folderSvg(36, 1.8)
+      icon.innerHTML = icons.folder(36, 1.8)
 
       const title = document.createElement('div')
       title.className = 'md-reader__folder-empty-title'
@@ -619,7 +558,7 @@ export class FolderManager {
       const openBtn = document.createElement('button')
       openBtn.className = 'md-reader__folder-open-btn'
       openBtn.type = 'button'
-      openBtn.innerHTML = `${this.folderSvg(15)} <span>${this.localize(
+      openBtn.innerHTML = `${icons.folder(15)} <span>${this.localize(
         'btn_open_folder',
       )}</span>`
       openBtn.onclick = e => {
@@ -642,7 +581,7 @@ export class FolderManager {
         recentWrap.className = className.FOLDER_RECENT
         const heading = document.createElement('div')
         heading.className = 'md-reader__folder-recent-title'
-        heading.innerHTML = `${this.clockSvg(12)}<span>${this.localize(
+        heading.innerHTML = `${icons.clock(12)}<span>${this.localize(
           'recent_folders',
         )}</span>`
         recentWrap.appendChild(heading)
@@ -660,7 +599,7 @@ export class FolderManager {
 
     const rootInfo = document.createElement('div')
     rootInfo.className = 'md-reader__folder-root-info'
-    rootInfo.innerHTML = `${this.folderSvg(
+    rootInfo.innerHTML = `${icons.folder(
       14,
     )}<span class="md-reader__folder-root-name" title="${this.rootNode.name}">${
       this.rootNode.name
@@ -675,7 +614,7 @@ export class FolderManager {
       if (this.showRecents) recentBtn.classList.add('active')
       recentBtn.type = 'button'
       recentBtn.title = this.localize('recent_folders')
-      recentBtn.innerHTML = this.clockSvg(13)
+      recentBtn.innerHTML = icons.clock(13)
       recentBtn.onclick = e => {
         e.preventDefault()
         e.stopPropagation()
@@ -689,7 +628,7 @@ export class FolderManager {
     changeBtn.className = 'md-reader__folder-action-btn'
     changeBtn.type = 'button'
     changeBtn.title = this.localize('btn_change_folder')
-    changeBtn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>`
+    changeBtn.innerHTML = icons.change(13)
     changeBtn.onclick = e => {
       e.preventDefault()
       e.stopPropagation()
@@ -700,7 +639,7 @@ export class FolderManager {
     closeBtn.className = 'md-reader__folder-action-btn'
     closeBtn.type = 'button'
     closeBtn.title = this.localize('btn_close_folder')
-    closeBtn.innerHTML = this.closeSvg(13)
+    closeBtn.innerHTML = icons.close(13)
     closeBtn.onclick = e => {
       e.preventDefault()
       e.stopPropagation()
@@ -751,7 +690,7 @@ export class FolderManager {
     treeList.innerHTML = ''
     if (!this.rootNode) return
 
-    const filtered = this.filterNode(this.rootNode, this.searchQuery)
+    const filtered = filterNode(this.rootNode, this.searchQuery)
     if (!filtered || !filtered.children || filtered.children.length === 0) {
       const noMatch = document.createElement('div')
       noMatch.className = 'md-reader__folder-no-match'
@@ -760,86 +699,14 @@ export class FolderManager {
       return
     }
 
-    this.renderNodeChildren(filtered.children, treeList, 0)
-  }
-
-  private renderNodeChildren(
-    nodes: FileTreeNode[],
-    parentElement: HTMLElement,
-    level: number,
-  ) {
-    for (const node of nodes) {
-      const li = document.createElement('li')
-      li.className = `${className.FOLDER_ITEM} ${
-        node.isDirectory
-          ? className.FOLDER_ITEM_DIR
-          : className.FOLDER_ITEM_FILE
-      }`
-      if (
-        !node.isDirectory &&
-        this.activeNode &&
-        node.path === this.activeNode.path
-      ) {
-        li.classList.add(className.FOLDER_ITEM_ACTIVE)
-      }
-
-      const itemContent = document.createElement('div')
-      itemContent.className = 'md-reader__folder-item-content'
-      itemContent.style.paddingLeft = `${level * 14 + 12}px`
-      itemContent.title = node.path
-
-      if (node.isDirectory) {
-        const toggleIcon = document.createElement('span')
-        toggleIcon.className = `md-reader__folder-toggle-icon ${
-          node.expanded ? 'expanded' : 'collapsed'
-        }`
-        toggleIcon.innerHTML = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>`
-
-        const folderIcon = document.createElement('span')
-        folderIcon.className = 'md-reader__folder-node-icon'
-        folderIcon.innerHTML = this.folderSvg(14)
-
-        const label = document.createElement('span')
-        label.className = 'md-reader__folder-label'
-        label.textContent = node.name
-
-        itemContent.appendChild(toggleIcon)
-        itemContent.appendChild(folderIcon)
-        itemContent.appendChild(label)
-
-        itemContent.onclick = () => {
-          node.expanded = !node.expanded
-          this.render()
-        }
-
-        li.appendChild(itemContent)
-
-        if (node.expanded && node.children && node.children.length > 0) {
-          const subUl = document.createElement('ul')
-          subUl.className = 'md-reader__folder-sub-tree'
-          this.renderNodeChildren(node.children, subUl, level + 1)
-          li.appendChild(subUl)
-        }
-      } else {
-        const fileIcon = document.createElement('span')
-        fileIcon.className = 'md-reader__folder-node-icon'
-        fileIcon.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`
-
-        const label = document.createElement('span')
-        label.className = 'md-reader__folder-label'
-        label.textContent = node.name
-
-        itemContent.appendChild(fileIcon)
-        itemContent.appendChild(label)
-
-        itemContent.onclick = () => {
-          this.selectFile(node)
-        }
-
-        li.appendChild(itemContent)
-      }
-
-      parentElement.appendChild(li)
-    }
+    renderNodeChildren(filtered.children, treeList, 0, {
+      activePath: this.activeNode ? this.activeNode.path : null,
+      onToggleDir: node => {
+        node.expanded = !node.expanded
+        this.render()
+      },
+      onSelectFile: node => this.selectFile(node),
+      loadingText: this.localize('folder_loading'),
+    })
   }
 }

@@ -19,6 +19,7 @@ import {
 } from '@/shared'
 import i18n from '@/config/i18n'
 import { FolderManager } from '@/core/folder'
+import { PathFolderManager } from '@/core/folder-path'
 import codeIcon from '@/images/icon_code.svg'
 import sideIcon from '@/images/icon_side.svg'
 import goTopIcon from '@/images/icon_go_top.svg'
@@ -56,7 +57,7 @@ function main(data: Data) {
     },
   }
   let localize = i18n(configData.language)
-  let folderManager: FolderManager | null = null
+  let folderManager: FolderManager | PathFolderManager | null = null
   let updateTabLabels: () => void = () => {}
 
   chrome.runtime.onMessage.addListener(({ action, data: { key, value } }) => {
@@ -182,27 +183,35 @@ function main(data: Data) {
   sideTabs.append([tabOutline, tabFolder])
   mdSide.append([sideTabs, sideOutlinePanel, sideFolderPanel])
 
-  const pageRaw = mdRaw
-  folderManager = new FolderManager(
-    sideFolderPanel.ele,
-    {
-      onFileSelected(content: string, fileName: string) {
-        mdRaw = content
-        contentRender(content)
-        document.title = fileName
-        renderSide()
-        window.scrollTo({ top: 0, behavior: 'smooth' })
+  if (window.location.protocol === 'file:') {
+    // Local files: browse by path, no picker / permission prompt needed
+    folderManager = new PathFolderManager(
+      sideFolderPanel.ele,
+      configData.language,
+    )
+  } else {
+    const pageRaw = mdRaw
+    folderManager = new FolderManager(
+      sideFolderPanel.ele,
+      {
+        onFileSelected(content: string, fileName: string) {
+          mdRaw = content
+          contentRender(content)
+          document.title = fileName
+          renderSide()
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        },
+        onFolderClosed() {
+          // Restore the document this page was opened with
+          mdRaw = pageRaw
+          contentRender(pageRaw)
+          renderSide()
+          window.scrollTo({ top: 0 })
+        },
       },
-      onFolderClosed() {
-        // Restore the document this page was opened with
-        mdRaw = pageRaw
-        contentRender(pageRaw)
-        renderSide()
-        window.scrollTo({ top: 0 })
-      },
-    },
-    configData.language,
-  )
+      configData.language,
+    )
+  }
 
   let idCache: { [content: string]: number } = Object.create(null)
   let headElements: HTMLElement[] = []
@@ -321,7 +330,10 @@ function main(data: Data) {
     void (async function watch() {
       clearTimeout(pollingTimer)
       // A file picked from the folder tree is watched through its handle
-      if (folderManager?.hasActiveFile()) {
+      if (
+        folderManager instanceof FolderManager &&
+        folderManager.hasActiveFile()
+      ) {
         const res = await folderManager.readActiveFileIfChanged()
         if (res !== null && res !== mdRaw) {
           mdRaw = res
